@@ -1,10 +1,12 @@
 from uuid import uuid4
 from config.settings.base import ALLOWED_AUDIO_TYPE, ALLOWED_DOCUMENT_TYPE, ALLOWED_IMAGE_TYPE, ALLOWED_VIDEO_TYPE
-
+from django.urls.converters import StringConverter
 from power_365.utils.enums import MediaType
+
 
 def generate_id(length: int = 8) -> str:
     return uuid4().hex
+
 
 def get_media_type(extention: str) -> str:
     if extention.lower() in ALLOWED_IMAGE_TYPE:
@@ -18,9 +20,14 @@ def get_media_type(extention: str) -> str:
     else:
         return MediaType.OTHER
 
+
 def is_image(filename: str) -> bool:
     import mimetypes
     try:
         return mimetypes.guess_type(filename)[0].startswith("image")
     except:
         return False
+
+
+# class NoLeadingSlashConverter(StringConverter):
+#     regex = r"[^/]+"

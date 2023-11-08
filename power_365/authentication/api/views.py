@@ -1,9 +1,5 @@
-from dateutil.relativedelta import relativedelta
-from django.db.models import Count
-from itertools import chain
 from django.contrib.auth.hashers import check_password
 from django.contrib.auth.hashers import make_password
-from lib2to3.pgen2.parse import ParseError
 from power_365.authentication import helpers
 from power_365.authentication.models import *
 from power_365.authentication.api.serializers import *
@@ -25,8 +21,11 @@ from django.contrib.auth.tokens import default_token_generator
 from django.utils import timezone
 from django.conf import settings
 from djoser.serializers import PasswordResetConfirmRetypeSerializer
+from rest_framework.exceptions import ParseError
+from power_365.authentication import helpers
+from django.utils.translation import gettext_lazy as _
 
-User = get_user_model()
+# User = get_user_model()
 
 
 class UserViewSet(RetrieveModelMixin, ListModelMixin, UpdateModelMixin, GenericViewSet):
@@ -52,7 +51,7 @@ class UserViewSet(RetrieveModelMixin, ListModelMixin, UpdateModelMixin, GenericV
             if not user.check_password(serializer.data.get('old_password')):
                 return Response({'detail': 'Old password does not match, if you have forgotten your password, please use reset instead.'},
                                 status=status.HTTP_400_BAD_REQUEST)
-            elif not serializer.data.get('password') == serializer.data.get('confirm_password'):
+            elif not serializer.data.get('password') == serializer.data.get('password_confirmation'):
                 return Response('password and confirm password do not match', status=status.HTTP_400_BAD_REQUEST)
             user.set_password(serializer.data.get('password'))
             user.save()
@@ -86,11 +85,11 @@ class TokenViewBase(generics.GenericAPIView):
 
         email = serializer.validated_data.get('user').get('email')
         user = User.objects.get(email=email)
-        if user:
-            if not user.email_verified_at:
-                self.request.user = user
-                settings.EMAIL.activation(
-                    self.request, {'request': request}).send(to=[user.email])
+        # if user:
+        #     if not user.email_verified_at:
+        #         self.request.user = user
+        #         settings.EMAIL.activation(
+        #             self.request, {'request': request}).send(to=[user.email])
         return Response(serializer.validated_data, status=status.HTTP_200_OK)
 
 
@@ -104,7 +103,7 @@ class CustomTokenObtainPairView(TokenViewBase):
 
 class RegisterUser(generics.CreateAPIView):
     queryset = User.objects.all()
-    serializer_class = UserSerializer
+    serializer_class = CustomRegisterSerializer
     permission_classes = []
     throttle_classes = [AnonRateThrottle]
 
@@ -116,10 +115,10 @@ class RegisterUser(generics.CreateAPIView):
         referrer = None
 
         if referrer_code:
-            referrer = models.User.objects.filter(
+            referrer = User.objects.filter(
                 referral_code=referrer_code).first()
         serializer.save()
-        user = models.User.objects.get(email=serializer.data.get('email'))
+        user = User.objects.get(email=serializer.data.get('email'))
 
         if user and referrer:
             # update the user
@@ -172,7 +171,7 @@ class ConfirmEmailView(generics.CreateAPIView):
             return Response({'detail': _('ok'),
                              'refresh': str(refresh),
                              'access': str(refresh.access_token),
-                             'user': serializers.UserCompleteSerializer(user).data
+                             'user': UserSerializer(user).data
                              }, status=status.HTTP_200_OK)
 
         raise ParseError(detail="Could not verify token",
@@ -186,7 +185,7 @@ class ResetPassword(APIView):
         email = request.data.get('email')
         if not email:
             return Response({'detail': 'Email is required'}, status=status.HTTP_400_BAD_REQUEST)
-        user = models.User.objects.filter(email=email).first()
+        user = User.objects.filter(email=email).first()
         if not user:
             return Response({'detail': f'Password reset mail has been sent to {email}.'}, status=status.HTTP_200_OK)
         context = {"user": user}
@@ -215,7 +214,7 @@ class ConfirmPasswordResetView(generics.CreateAPIView):
             return Response({'detail': _('ok'),
                              'refresh': str(refresh),
                              'access': str(refresh.access_token),
-                             'user': serializers.UserCompleteSerializer(user).data
+                             'user': UserSerializer(user).data
                              }, status=status.HTTP_200_OK)
 
         raise ParseError(detail="Could not verify token",
@@ -256,6 +255,7 @@ class ChangeProfileImage(generics.CreateAPIView):
         return {'user': self.request.user,
                 'media': self.request.FILES.get('media')}
 
+
 class SetPinView(generics.CreateAPIView):
     serializer_class = SetPinSerializer
 
@@ -282,6 +282,25 @@ class SetPinView(generics.CreateAPIView):
 
     def get_queryset(self):
         return Pin.objects.filter(user=self.request.user)
+
+
+class SetPasswordView(generics.CreateAPIView):
+    serializer_class = SetPasswordSerializer
+    queryset = User.objects.all()
+
+    def create(self, request, *args, **kwargs):
+        user = request.user
+        password = request.data.get('password')
+        password_confirmation = request.data.get('password_confirmation')
+        if not password:
+            return Response({"error": "Password is required."}, status=400)
+        if not password_confirmation:
+            return Response({"error": "Password confirmation is required."}, status=400)
+
+        if password != password_confirmation:
+            return Response({"error": "password and password_confirmation do not match."}, status=400)
+        user.set_password(password)
+        return Response({"message": "Password set successfully."})
 
 
 class ChangePinView(generics.CreateAPIView):
@@ -324,6 +343,40 @@ class ChangePinView(generics.CreateAPIView):
         return Response({"message": "Pin changed successfully."})
 
 
+class VerifyOTPView(generics.CreateAPIView):
+    serializer_class = VerifyOTPSerializer
+    permission_classes = []
+
+    def create(self, request, *args, **kwargs):
+        code = request.data.get('code')
+        phone_number = request.data.get('phone_number')
+        if not phone_number:
+            return Response({"error": "Phone number is required."}, status=400)
+
+        if not code:
+            return Response({"error": "Verification code is required."}, status=400)
+
+        user = User.objects.filter(
+            phone_number=phone_number.replace('+', '')).first()
+        if not user:
+            return Response({"error": "User was not found."}, status=404)
+
+        if not helpers.verify_otp(user, code):
+
+            return Response({"error": "Verification code is incorrect."}, status=400)
+
+        user.phone_number_verified_at = timezone.now()
+        user.save()
+
+        refresh = RefreshToken.for_user(user)
+
+        return Response({'detail': _('ok'),
+                         'refresh': str(refresh),
+                         'access': str(refresh.access_token),
+                         'user': UserSerializer(user).data
+                         }, status=status.HTTP_200_OK)
+
+
 class VerifyPinView(generics.CreateAPIView):
     serializer_class = VerifyPinSerializer
 
@@ -341,3 +394,34 @@ class VerifyPinView(generics.CreateAPIView):
             return Response({"error": "Pin is incorrect."}, status=400)
 
         return Response({"message": "Pin verified successfully."})
+
+
+class RequestOtpView(generics.CreateAPIView):
+    serializer_class = RequestOtpSerializer
+    permission_classes = []
+
+    def create(self, request, *args, **kwargs):
+        phone_number = request.data.get('phone_number')
+        if not phone_number:
+            return Response({"error": "Phone Number is required."}, status=400)
+        user = User.objects.filter().first()
+        # user.delete()
+        print(user.email, user.first_name, user.phone_number)
+        user = User.objects.filter(
+            phone_number=phone_number.replace('+', '')).first()
+        if not user:
+            return Response({"error": "User was not found."}, status=404)
+         # to do generate and send
+        otp = helpers.generate_otp(user)
+        print('otp', otp)
+        try:
+
+            message = twilio_client.messages.create(
+                to='+'+user.phone_number,
+                from_=settings.TWILIO_PHONE_NUMBER,
+                body=f"Your verification code for Power365 is {otp}")
+            return Response({"message": f"Verification code has been sent to {phone_number} successfully."})
+
+        except:
+            raise ParseError(detail="Failed to send verification code",
+                             code=status.HTTP_422_UNPROCESSABLE_ENTITY)

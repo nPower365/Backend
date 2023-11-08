@@ -1,11 +1,13 @@
 from rest_framework.response import Response
 from rest_framework import generics
+from rest_framework.permissions import IsAuthenticated
 from power_365.notifications.models import Notification
 from power_365.notifications.api.serializers import NotificationSerializer, NotificationStatisticsSerializer
 
 
 class ListNotificationsView(generics.ListAPIView):
     serializer_class = NotificationSerializer
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
 
@@ -15,6 +17,8 @@ class ListNotificationsView(generics.ListAPIView):
 class RetrieveNotificationView(generics.RetrieveAPIView):
     serializer_class = NotificationSerializer
     queryset = Notification.objects.all()
+    permission_classes = [IsAuthenticated]
+
 
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -27,6 +31,8 @@ class RetrieveNotificationView(generics.RetrieveAPIView):
 class NotificationStatisticsView(generics.RetrieveAPIView):
     serializer_class = NotificationStatisticsSerializer
     pagination_class = None
+    permission_classes = [IsAuthenticated]
+
 
     def get_queryset(self):
 
@@ -42,6 +48,8 @@ class NotificationStatisticsView(generics.RetrieveAPIView):
 
 class MarkUserNotificationsAsRead(generics.CreateAPIView):
     serializer_class = NotificationStatisticsSerializer
+    permission_classes = [IsAuthenticated]
+
 
     def get_queryset(self):
 

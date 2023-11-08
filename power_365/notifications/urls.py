@@ -17,8 +17,8 @@ urlpatterns = [
          MarkUserNotificationsAsRead.as_view(), name='mark-as-read'),
     path('notification-statistics/', NotificationStatisticsView.as_view(),
          name="notification-statistics"),
-    path("user/notifications/", ListNotificationsView.as_view(),
+    path("account/notifications/", ListNotificationsView.as_view(),
          name="list_notifications"),
-    path("user/notifications/<str:pk>/", RetrieveNotificationView.as_view(),
+    path("account/notifications/<str:pk>/", RetrieveNotificationView.as_view(),
          name="single_notifications"),
 ]

@@ -6,7 +6,7 @@ from django.urls import include, path, re_path
 from django.views import defaults as default_views
 from django.views.generic import TemplateView
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
-from rest_framework.authtoken.views import obtain_auth_token
+# from rest_framework.authtoken.views import obtain_auth_token
 
 urlpatterns = [
     # path("", TemplateView.as_view(template_name="pages/home.html"), name="home"),
@@ -34,13 +34,17 @@ urlpatterns += [
     # path('auth/', include('djoser.urls.authtoken')),
 
 
-    path("", include("power_365.authentication.urls", namespace="authentication")),
-    path("", include("power_365.notifications.urls", namespace="notifications")),
+    path("", include("power_365.authentication.urls",
+                     namespace="authentication")),
+    path("", include("power_365.notifications.urls",
+                     namespace="notifications")),
     path("", include("power_365.core.urls", namespace="core")),
+    path("", include("power_365.delivery.urls", namespace="delivery")),
+    path("", include("power_365.wallets.urls", namespace="wallets")),
 
 
 
-    path("schema/", SpectacularAPIView.as_view(), name="api-schema"),
+    path("schema/", SpectacularAPIView.as_view(), name="api-schema", ),
     path("docs/", SpectacularSwaggerView.as_view(url_name="api-schema"),
          name="api-docs",),
 

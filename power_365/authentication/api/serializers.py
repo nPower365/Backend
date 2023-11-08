@@ -3,7 +3,7 @@ from pkg_resources import require
 from power_365.core.api.serializers import MediaSerializer
 from djoser.conf import settings as djoser_settings
 from rest_framework import serializers
-from djoser.serializers import UserCreatePasswordRetypeSerializer
+from djoser.serializers import UserCreateSerializer
 from power_365.authentication.models import *
 from power_365.core.models import *
 from rest_framework_simplejwt.settings import api_settings
@@ -15,6 +15,9 @@ from djoser.serializers import UidAndTokenSerializer
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.models import update_last_login
 from rest_framework import exceptions as drf_exceptions
+from django_twilio.client import twilio_client
+from power_365.authentication import helpers
+from django.conf import settings
 
 User = get_user_model()
 
@@ -36,14 +39,18 @@ class ProfileImageSerializer(serializers.ModelSerializer):
         return profile_image
 
 
-class CustomRegisterSerializer(UserCreatePasswordRetypeSerializer):
+class CustomRegisterSerializer(UserCreateSerializer):
+    password = None
 
     first_name = serializers.CharField()
     last_name = serializers.CharField()
+    phone_number = serializers.CharField()
     referral_code = serializers.CharField(required=False, allow_blank=True)
 
     def create(self, validated_data):
         referral_code = validated_data.pop('referral_code', None)
+        validated_data['phone_number'] = validated_data.get(
+            'phone_number').replace('+', '')
         user = super().create(validated_data)
         if referral_code:
             referrer = User.objects.filter(referral_code=referral_code).first()
@@ -54,18 +61,29 @@ class CustomRegisterSerializer(UserCreatePasswordRetypeSerializer):
                     referrer=referrer,
                     referee=user
                 )
+        # to do generate and send otp
+        try:
+            otp = helpers.generate_otp(user)
+            message = twilio_client.messages.create(
+                to=user.phone_number,
+                from_=settings.TWILIO_PHONE_NUMBER,
+                body=f"Your verification code for Power365 is {otp}")
+        except:
+            pass
 
         return user
 
+    def validate(self, attrs):
+        return attrs
+
     class Meta:
-        model = UserCreatePasswordRetypeSerializer.Meta.model
-        fields = UserCreatePasswordRetypeSerializer.Meta.fields + \
-            ("first_name", "last_name", "gender", "date_of_birth", 'referral_code')
+        model = UserCreateSerializer.Meta.model
+        fields = UserCreateSerializer.Meta.fields + \
+            ("first_name", "last_name", "phone_number", 'referral_code')
         extra_kwargs = {
             "first_name": {"required": True},
             "last_name": {"required": True},
         }
-
 
 
 class TokenObtainSerializer(serializers.Serializer):
@@ -78,12 +96,12 @@ class TokenObtainSerializer(serializers.Serializer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        self.fields['username_or_email'] = serializers.CharField()
+        self.fields['email'] = serializers.CharField()
         self.fields['password'] = PasswordField()
 
     def validate(self, attrs):
         authenticate_kwargs = {
-            self.username_field: attrs['username_or_email'],
+            self.username_field: attrs['email'],
             'password': attrs['password'],
         }
         try:
@@ -140,14 +158,12 @@ class CustomTokenObtainPairSerializer(TokenObtainSerializer):
         return data
 
 
-
 class UserSerializer(serializers.ModelSerializer):
     country = serializers.StringRelatedField()
     state = serializers.StringRelatedField()
     city = serializers.StringRelatedField()
     username = serializers.CharField(max_length=255, required=False)
     current_profile_image = ProfileImageSerializer(read_only=True)
-
 
     country_id = serializers.PrimaryKeyRelatedField(
         queryset=Country.objects.all()
@@ -158,7 +174,6 @@ class UserSerializer(serializers.ModelSerializer):
     city_id = serializers.PrimaryKeyRelatedField(
         queryset=City.objects.all()
     )
-
 
     def update(self, instance, validated_data):
         country_id = validated_data.pop(
@@ -187,10 +202,8 @@ class UserSerializer(serializers.ModelSerializer):
         instance.date_of_birth = validated_data.get(
             "date_of_birth", instance.date_of_birth)
 
-
         instance.save()
         return instance
-
 
     class Meta:
         model = User
@@ -227,17 +240,60 @@ class TokenSerializer(serializers.ModelSerializer):
         fields = ('auth_token', 'user')
 
 
-
 class SetPinSerializer(serializers.Serializer):
     old_pin = serializers.CharField(max_length=4, required=False)
     pin = serializers.CharField(max_length=4)
     pin_confirmation = serializers.CharField(max_length=6)
 
 
+class SetPasswordSerializer(serializers.Serializer):
+    old_password = serializers.CharField(max_length=4, required=False)
+    password = serializers.CharField(max_length=4)
+    password_confirmation = serializers.CharField(max_length=6)
+
+
+class VerifyOTPSerializer(serializers.Serializer):
+    code = serializers.CharField(max_length=4)
+    phone_number = serializers.CharField(max_length=15)
+
+
 class VerifyPinSerializer(serializers.Serializer):
     pin = serializers.CharField(max_length=4)
+
+
+class RequestOtpSerializer(serializers.Serializer):
+    phone_number = serializers.CharField(max_length=15)
 
 
 class LocationSerializer(serializers.Serializer):
     id = serializers.CharField(max_length=255)
     location = serializers.CharField(max_length=255)
+
+
+class UpdatePasswordSerializer(serializers.Serializer):
+    def update(self, instance, validated_data):
+        pass
+
+    def create(self, validated_data):
+        pass
+
+    def to_internal_value(self, data):
+        return data
+
+    password = serializers.CharField(required=True)
+    password_confirmation = serializers.CharField(required=True)
+    old_password = serializers.CharField(required=True)
+
+    class Meta:
+        fields = ('old_password', 'password', 'password_confirmation')
+        extra_kwargs = {
+            'old_password': {
+                'required': True,
+            },
+            'password': {
+                'required': True,
+            },
+            'password_confirmation': {
+                'required': True,
+            }
+        }
